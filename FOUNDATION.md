@@ -140,6 +140,57 @@ docs/06-learning/
 └── error-patterns.md     # Catálogo de errores recurrentes y sus fixes
 ```
 
+
+## 11. Ciclo Completo de PR — Gestionado por el Agente
+
+El agente gestiona el ciclo completo de PR **sin intervención humana**,
+salvo la aprobación explícita del humano cuando el proceso lo requiere.
+
+### Protocolo obligatorio al abrir un PR:
+
+```bash
+# 1. Push del branch
+git push -u origin feat/nombre-feature
+
+# 2. Abrir PR con base correcta (nunca saltar al main directamente)
+gh pr create --base develop --head feat/nombre-feature \
+  --title "tipo: descripción concisa" \
+  --body "$(cat <<'EOF'
+## Resumen
+...
+
+## Definition of Done
+- [x] item
+EOF
+)"
+
+# 3. Verificar que el CI esté en verde (esperar si es necesario)
+gh pr checks <PR_NUMBER> --watch
+
+# 4. Si verde: mergear y eliminar branch
+gh pr merge <PR_NUMBER> --merge --delete-branch
+
+# 5. Volver a la rama base
+git checkout develop && git pull
+```
+
+### Reglas del ciclo:
+
+- **Nunca** pedirle al humano que haga el merge si el CI está verde y no hay comentarios pendientes
+- **Siempre** eliminar el branch después del merge (`--delete-branch`)
+- **Siempre** reportar al humano el resultado: "PR #N mergeado. Branch eliminado. En develop."
+- Si el CI falla: diagnosticar, corregir en el mismo branch, re-pushear — **no abrir PR nuevo**
+- Si hay comentarios del humano: resolverlos antes de mergear, nunca forzar merge con comentarios abiertos
+
+### Flujo completo con verificación:
+
+```
+feat/branch → PR abierto → CI corre → verde → merge → branch eliminado → informe
+                                     ↓
+                                    rojo → diagnóstico → fix → push → CI corre de nuevo
+```
+
+
 ---
 
 > AIDLC v0.1 Beta · Agnóstico al lenguaje · Del uso personal al corporativo
