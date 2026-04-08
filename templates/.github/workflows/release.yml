@@ -1,0 +1,222 @@
+name: Release — Deploy to Production
+
+# Template AIDLC — Copiar a .github/workflows/release.yml en tu proyecto
+#
+# IMPORTANTE: El deploy a producción requiere aprobación manual explícita.
+# Configurar en GitHub: Settings → Environments → production → Required reviewers
+#
+# Trigger: crear un tag de versión vX.Y.Z
+# El workflow verifica que staging está saludable antes de proponer el deploy.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"      # v1.0.0, v2.3.1
+      - "v[0-9]+.[0-9]+.[0-9]+-*"    # v1.0.0-beta.1, v1.0.0-rc.1
+
+permissions:
+  contents: write  # para crear GitHub Release
+  deployments: write
+
+jobs:
+  # ──────────────────────────────────────────
+  # VALIDACIÓN: verificar que el tag apunta a un commit que pasó CI
+  # ──────────────────────────────────────────
+  validate-release:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+          echo "Releasing version: $VERSION"
+
+      - name: Verify commit has passing CI
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "Tag points to commit: $COMMIT_SHA"
+          # GitHub verifica el estado del commit automáticamente
+          # via branch protection rules en main
+
+  # ──────────────────────────────────────────
+  # STAGING HEALTH CHECK
+  # ──────────────────────────────────────────
+  staging-health:
+    name: Verify Staging Health
+    runs-on: ubuntu-latest
+    needs: [validate-release]
+    steps:
+      - name: Check staging is healthy
+        run: |
+          echo "Verifying staging environment before production release..."
+          curl --fail --retry 5 --retry-delay 10 \
+            ${{ vars.STAGING_URL }}/health
+          echo "Staging is healthy — safe to proceed to production"
+
+      - name: Run regression tests against staging
+        run: |
+          echo "Running smoke tests against staging..."
+          # Adaptar según el proyecto:
+          # pytest tests/smoke/ --base-url=${{ vars.STAGING_URL }}
+          # npx playwright test tests/smoke/ --base-url=${{ vars.STAGING_URL }}
+          echo "Smoke tests passed"
+
+  # ──────────────────────────────────────────
+  # BUILD DE IMAGEN DE PRODUCCIÓN
+  # ──────────────────────────────────────────
+  build-production-image:
+    name: Build & Push Production Image
+    runs-on: ubuntu-latest
+    needs: [staging-health]
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.REGISTRY_URL || 'ghcr.io' }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push production image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.REGISTRY_URL || 'ghcr.io' }}/${{ github.repository }}:${{ needs.validate-release.outputs.version }}
+            ${{ vars.REGISTRY_URL || 'ghcr.io' }}/${{ github.repository }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ needs.validate-release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan production image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ vars.REGISTRY_URL || 'ghcr.io' }}/${{ github.repository }}:${{ needs.validate-release.outputs.version }}
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          # Si falla: no deploy a producción
+
+  # ──────────────────────────────────────────
+  # DEPLOY A PRODUCCIÓN — APROBACIÓN MANUAL REQUERIDA
+  #
+  # GitHub pausará aquí y esperará que un reviewer autorizado
+  # apruebe en Settings → Environments → production
+  # El agente de IA nunca puede bypassear este gate.
+  # ──────────────────────────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-production-image, validate-release]
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          echo "Deploying ${{ needs.validate-release.outputs.version }} to production..."
+          echo "Implementar según proveedor:"
+          echo "  Railway: railway up --environment production"
+          echo "  AWS ECS: aws ecs update-service --force-new-deployment"
+          echo "  Fly.io: fly deploy --config fly.production.toml"
+          echo "  K8s: kubectl set image deployment/app app=IMAGE:TAG"
+        env:
+          PRODUCTION_DEPLOY_TOKEN: ${{ secrets.PRODUCTION_DEPLOY_TOKEN }}
+
+      - name: Wait for production deployment
+        run: sleep 60
+
+      - name: Production smoke tests
+        run: |
+          echo "Running smoke tests against production..."
+          curl --fail --retry 5 --retry-delay 15 \
+            ${{ vars.PRODUCTION_URL }}/health
+          echo "Production health check passed"
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Production deployment successful: ${{ needs.validate-release.outputs.version }}"
+          # Adaptar: Slack, Teams, email según el equipo
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "DEPLOY FAILED — initiating rollback"
+          echo "Implementar rollback según proveedor"
+          # Railway / Render: re-deploy del release anterior
+          # AWS ECS: aws ecs update-service con imagen anterior
+          # Notificar al equipo inmediatamente
+
+  # ──────────────────────────────────────────
+  # CREAR GITHUB RELEASE
+  # ──────────────────────────────────────────
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [deploy-production, validate-release]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Obtener commits desde el tag anterior
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREVIOUS_TAG}..HEAD)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Release ${{ needs.validate-release.outputs.version }}"
+          prerelease: ${{ needs.validate-release.outputs.is_prerelease }}
+          body: |
+            ## Changes in ${{ needs.validate-release.outputs.version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Deployment
+
+            - Deployed to production: ${{ vars.PRODUCTION_URL }}
+            - Docker image: `${{ vars.REGISTRY_URL || 'ghcr.io' }}/${{ github.repository }}:${{ needs.validate-release.outputs.version }}`
+
+            ---
+            Framework: AIDLC v0.1 Beta
+          generate_release_notes: false

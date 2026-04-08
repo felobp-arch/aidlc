@@ -1,0 +1,104 @@
+# AIDLC — Dependabot configuration template
+# Copiar a .github/dependabot.yml en el proyecto
+#
+# Dependabot crea PRs automáticos cuando hay actualizaciones de seguridad
+# o versiones nuevas de dependencias.
+
+version: 2
+
+updates:
+  # ─────────────────────────────────────────
+  # GitHub Actions — siempre activo
+  # ─────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/Bogota"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+
+  # ─────────────────────────────────────────
+  # Python — descomentar si el proyecto es Python
+  # ─────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/Bogota"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+    # Actualización automática de patch y minor — major requiere revisión
+    versioning-strategy: increase-if-necessary
+    # Agrupar actualizaciones no-críticas en un solo PR
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - patch
+    # Ignorar actualizaciones major de dependencias estables
+    # (requieren revisión manual y migration guide)
+    ignore:
+      - dependency-name: "sqlalchemy"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+
+  # ─────────────────────────────────────────
+  # Node.js — descomentar si el proyecto es Node
+  # ─────────────────────────────────────────
+  # - package-ecosystem: npm
+  #   directory: "/"
+  #   schedule:
+  #     interval: weekly
+  #     day: monday
+  #     time: "09:00"
+  #     timezone: "America/Bogota"
+  #   labels:
+  #     - "dependencies"
+  #     - "nodejs"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+  #   versioning-strategy: increase-if-necessary
+  #   groups:
+  #     dev-dependencies:
+  #       dependency-type: development
+  #       update-types:
+  #         - minor
+  #         - patch
+  #   ignore:
+  #     - dependency-name: "typescript"
+  #       update-types: ["version-update:semver-major"]
+
+  # ─────────────────────────────────────────
+  # Docker — si se usa Dockerfile con imágenes base
+  # ─────────────────────────────────────────
+  # - package-ecosystem: docker
+  #   directory: "/"
+  #   schedule:
+  #     interval: weekly
+  #     day: monday
+  #     time: "09:00"
+  #     timezone: "America/Bogota"
+  #   labels:
+  #     - "dependencies"
+  #     - "docker"
+  #   commit-message:
+  #     prefix: "chore(docker)"

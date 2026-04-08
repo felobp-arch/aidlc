@@ -1,0 +1,106 @@
+# AIDLC — Pre-commit hooks template
+# Copiar a la raíz del proyecto
+#
+# Setup:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Correr manualmente:
+#   pre-commit run --all-files
+
+repos:
+  # ─────────────────────────────────────────
+  # SEGURIDAD — corre primero, bloquea commits con secrets
+  # ─────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: Detect hardcoded secrets
+        # Falla si detecta API keys, passwords, tokens, etc.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Prevenir commits de archivos grandes
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+      # Detectar archivos con conflictos de merge sin resolver
+      - id: check-merge-conflict
+
+      # Verificar que los archivos JSON son válidos
+      - id: check-json
+
+      # Verificar que los archivos YAML son válidos
+      - id: check-yaml
+
+      # Verificar que los archivos TOML son válidos
+      - id: check-toml
+
+      # Prevenir push a main directamente
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+      # Eliminar espacios en blanco al final de las líneas
+      - id: trailing-whitespace
+
+      # Asegurar que los archivos terminan en newline
+      - id: end-of-file-fixer
+
+      # Detectar claves privadas accidentales
+      - id: detect-private-key
+
+  # ─────────────────────────────────────────
+  # PYTHON — descomentar si el proyecto es Python
+  # ─────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        name: Lint Python (ruff)
+        args: [--fix]
+      - id: ruff-format
+        name: Format Python (ruff)
+
+  # ─────────────────────────────────────────
+  # NODE.JS — descomentar si el proyecto es Node/TypeScript
+  # ─────────────────────────────────────────
+  # - repo: local
+  #   hooks:
+  #     - id: eslint
+  #       name: ESLint
+  #       entry: npx eslint
+  #       language: node
+  #       files: \.(js|ts|tsx)$
+  #       args: [--fix]
+  #
+  #     - id: prettier
+  #       name: Prettier
+  #       entry: npx prettier --write
+  #       language: node
+  #       files: \.(js|ts|tsx|json|css|md)$
+
+  # ─────────────────────────────────────────
+  # COMMITS — formato convencional
+  # ─────────────────────────────────────────
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - feat
+          - fix
+          - docs
+          - chore
+          - refactor
+          - test
+          - perf
+          - ci
+          - build
+        # Formato: tipo(scope): descripción
+        # Ejemplos:
+        #   feat(auth): add JWT refresh token rotation
+        #   fix(api): handle null user_id in health endpoint
+        #   test(services): add unit tests for score calculation
