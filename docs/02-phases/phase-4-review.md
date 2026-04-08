@@ -16,9 +16,60 @@ y está listo para llegar a staging.
 
 ## Salida
 
-- PR aprobado por el humano
-- Merge a `main` completado
-- Deploy automático a staging activado
+- PR mergeado por el agente (si CI verde y sin comentarios pendientes)
+- Branch de feature eliminado
+- `develop` actualizado
+
+---
+
+## Protocolo Completo de PR — Comandos Exactos
+
+El agente gestiona el ciclo completo sin intervención humana, salvo la
+aprobación explícita inicial del Execution Plan.
+
+```bash
+# 1. Push del branch al remoto
+git push -u origin feat/nombre-feature
+
+# 2. Abrir PR (respetar flujo: feat/* → develop → staging → main)
+gh pr create \
+  --base develop \
+  --head feat/nombre-feature \
+  --title "tipo(scope): descripción" \
+  --body "$(cat <<'BODY'
+## Resumen
+[bullets del qué y el por qué]
+
+## Execution Plan ejecutado
+[link o referencia]
+
+## Definition of Done
+- [x] item 1
+- [x] item 2
+
+## Instrucción de merge
+Esperar CI verde. No hacer squash.
+
+🤖 Generated with Claude Code
+BODY
+)"
+
+# 3. Verificar checks — esperar hasta que terminen
+gh pr checks <PR_NUMBER> --watch
+
+# 4a. CI verde → mergear y limpiar
+gh pr merge <PR_NUMBER> --merge --delete-branch
+
+# 4b. CI rojo → diagnosticar, corregir, re-pushear (no abrir PR nuevo)
+git add <archivos-corregidos>
+git commit -m "fix: corregir fallo de CI — <descripción>"
+git push
+# El CI corre de nuevo automáticamente; volver al paso 3
+
+# 5. Volver a la rama base y actualizar
+git checkout develop
+git pull
+```
 
 ---
 
@@ -88,6 +139,7 @@ RF-001, RF-002 — [link al SRD]
 - Secrets detectados en el diff
 - Cambios en `main` directamente (sin PR)
 - El PR cubre más de un Execution Plan (demasiado grande)
+- Comentarios del humano sin resolver
 
 ---
 
@@ -104,22 +156,32 @@ PRs grandes son más difíciles de revisar y más probables de introducir bugs.
 
 ---
 
-## Proceso de Revisión
+## Flujo Completo
 
 ```
-1. Agente abre PR con descripción completa
-       ↓
-2. Pipeline corre automáticamente (CI)
-       ↓
-3. Humano revisa el diff
-       ↓
-4a. Sin comentarios → aprueba merge
-       ↓
-4b. Con comentarios → agente responde o corrige
-       ↓
-5. Humano aprueba merge
-       ↓
-6. Merge a main → deploy automático a staging
+feat/branch
+    │
+    ▼
+gh pr create --base develop   ← nunca saltar al main directamente
+    │
+    ▼
+CI corre automáticamente
+    │
+    ├── ROJO → diagnosticar → fix → push → CI corre de nuevo
+    │
+    └── VERDE
+          │
+          ▼
+    gh pr checks --watch   ← esperar si aún está corriendo
+          │
+          ▼
+    gh pr merge --merge --delete-branch
+          │
+          ▼
+    git checkout develop && git pull
+          │
+          ▼
+    Reportar al humano: "PR #N mergeado. Branch eliminado. En develop."
 ```
 
 ---
@@ -133,6 +195,7 @@ Cuando el humano deja un comentario en el PR:
 3. Si es una pregunta: responde con contexto del Execution Plan o SRD
 4. Si el agente no está de acuerdo: argumenta con razones técnicas, no solo acepta
 5. El humano tiene la decisión final
+6. **Nunca mergear con comentarios sin resolver**
 
 ---
 
@@ -140,12 +203,12 @@ Cuando el humano deja un comentario en el PR:
 
 La Fase 4 está completa cuando:
 
-1. El PR tiene aprobación del humano
-2. Pipeline está en verde
-3. Merge completado a `main`
-4. Deploy a staging iniciado automáticamente
+1. CI verde ✓
+2. Merge completado ✓
+3. Branch de feature eliminado ✓
+4. `develop` actualizado localmente ✓
 
-**El agente anuncia:** "Merge completado. Deploy a staging en curso (Fase 5)."
+**El agente reporta:** "PR #N mergeado a develop. Branch feat/X eliminado. Próxima tarea: [siguiente del backlog]."
 
 ---
 
